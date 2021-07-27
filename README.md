@@ -1,6 +1,6 @@
 # Joy-Con Turn Off
 
-This program has just one function: To turn off Joy-Cons.
+This program has just one function: To turn off Joy-Cons and other official Nintendo Switch controllers.
 
 For some weird reason, Nintendo does not allow turning Switch controllers off. They just stay in
 a sleep mode which drains the battery fully in about a week or two.
