@@ -4,106 +4,131 @@
 #include "windows.h"
 #include "atlstr.h"
 #include "jcoff.h"
-#include "hidapi.h"
+
+#define HID_BUFFER_LENGTH 0x40
+#define MAX_STR 10000
+
+#define NINTENDO_VID (0x57e)
+#define JOY_CON_L_PID (0x2006)
+#define JOY_CON_R_PID (0x2007)
+#define PRO_CONTROLLER_PID (0x2009)
+#define SNES_CONTROLLER_PID (0x2017)
+#define CHARGING_GRIP_PID (0x200e)
+
+#define CMD_SET_INPUT_REPORT_MODE (0x03)
+#define CMD_SET_HCI_STATE (0x06)
+#define CMD_RESET_PAIRING_INFO (0x07)
+#define CMD_SET_SHIPMENT_LOW_POWER_STATE (0x08)
+#define CMD_SET_LEDS (0x30)
 
 using namespace System::Windows;
 
 #pragma comment(lib, "SetupAPI")
 
 bool enable_traffic_dump = false;
+bool bluetooth = true;
+uint8_t global_count = 0;
+hid_device* handle;
+unsigned char buf[HID_BUFFER_LENGTH];
 
-hid_device *handle;
+void show_error(wchar_t* title, unsigned char* buf, int length)
+{
+    wchar_t ret[MAX_STR];
+    wchar_t data[MAX_STR];
+    wchar_t temp[MAX_STR];
+    for (unsigned int i = 0; i < HID_BUFFER_LENGTH; i++) {
+        swprintf(temp, MAX_STR, L"%02X ", buf[i]);
+        wcsncat(data, temp, MAX_STR);
+    }
+    swprintf(ret, MAX_STR, L"Error: %ls\n\n\nBytes read/written: %d\nData:\n%ls", title, length, data);
+    MessageBox(NULL, ret, L"ERROR", MB_ICONERROR | MB_OK);
 
-int set_leds(u8 status) {
-    int res;
-    u8 buf[49];
-    memset(buf, 0, sizeof(buf));
-    auto hdr = (brcm_hdr *)buf;
-    auto pkt = (brcm_cmd_01 *)(hdr + 1);
-    hdr->cmd = 0x01;
-    hdr->timer = timing_byte & 0xF;
-    timing_byte++;
-    pkt->subcmd = 0x30;
-    pkt->subcmd_arg.arg1 = status;
-    res = hid_write(handle, buf, sizeof(buf));
-    res = hid_read_timeout(handle, buf, 0, 64);
-
-    return 0;
 }
 
-int set_shipment_low_power() {
-    int res;
-    u8 buf[49];
-    memset(buf, 0, sizeof(buf));
-    auto hdr = (brcm_hdr *)buf;
-    auto pkt = (brcm_cmd_01 *)(hdr + 1);
-    hdr->cmd = 0x01;
-    hdr->timer = timing_byte & 0xF;
-    timing_byte++;
-    pkt->subcmd = 0x08;
-    pkt->subcmd_arg.arg1 = 0x01;
-    res = hid_write(handle, buf, sizeof(buf));
-    res = hid_read_timeout(handle, buf, 0, 64);
+void joycon_send_subcommand(hid_device* handle, int subcommand, uint8_t* data, int data_length)
+{
+    memset(buf, 0, HID_BUFFER_LENGTH);
 
-    return 0;
+    buf[0] = 0x01; // Command
+    buf[1] = (global_count++) & 0xF; // Packet number
+
+    uint8_t rumble_base[8] = { 0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40 };
+    memcpy(buf + 2, rumble_base, 8);
+
+    buf[10] = subcommand;
+    memcpy(buf + 11, data, data_length);
+
+    int res = hid_write(handle, buf, HID_BUFFER_LENGTH);
+    if (res == -1) {
+        show_error(L"HID write error when sending a command!", buf, res);
+    }
+
+    // The Pro Controller at least does not like receiving commands too fast
+    Sleep(100);
+
+    if (subcommand == CMD_SET_HCI_STATE && data == 0x0) {
+        // Don't try to read the response after commanding the controller to turn off
+        return;
+    }
+
+    memset(buf, 0, HID_BUFFER_LENGTH);
+    res = hid_read_timeout(handle, buf, HID_BUFFER_LENGTH, 1000);
+    if (res == -1) {
+        show_error(L"HID read error when sending a command!", buf, res);
+    }
 }
 
-int reset_pairing_information() {
-    int res;
-    u8 buf[49];
-    memset(buf, 0, sizeof(buf));
-    auto hdr = (brcm_hdr *)buf;
-    auto pkt = (brcm_cmd_01 *)(hdr + 1);
-    hdr->cmd = 0x01;
-    hdr->timer = timing_byte & 0xF;
-    timing_byte++;
-    pkt->subcmd = 0x07;
-    pkt->subcmd_arg.arg1 = 0x00;
-    res = hid_write(handle, buf, sizeof(buf));
-    res = hid_read_timeout(handle, buf, 0, 64);
-
-    return 0;
+void set_leds(hid_device* handle, uint8_t status)
+{
+    unsigned char data[1] = { status };
+    joycon_send_subcommand(handle, CMD_SET_LEDS, data, 1);
 }
 
-int turn_off() {
-    int res;
-    u8 buf[49];
-    memset(buf, 0, sizeof(buf));
-    auto hdr = (brcm_hdr *)buf;
-    auto pkt = (brcm_cmd_01 *)(hdr + 1);
-    hdr->cmd = 0x01;
-    hdr->timer = timing_byte & 0xF;
-    timing_byte++;
-    pkt->subcmd = 0x06;
-    pkt->subcmd_arg.arg1 = 0x00;
-    res = hid_write(handle, buf, sizeof(buf));
-    res = hid_read_timeout(handle, buf, 0, 64);
-
-    return 0;
+void set_shipment_low_power(hid_device* handle)
+{
+    unsigned char enable[1] = { 0x01 };
+    joycon_send_subcommand(handle, CMD_SET_SHIPMENT_LOW_POWER_STATE, enable, 1);
 }
 
-int device_connection() {
+void reset_pairing_information(hid_device* handle)
+{
+    joycon_send_subcommand(handle, CMD_RESET_PAIRING_INFO);
+}
+
+void turn_off(hid_device* handle)
+{
+    joycon_send_subcommand(handle, CMD_SET_HCI_STATE);
+}
+
+void set_input_report_mode(hid_device* handle)
+{
+    unsigned char simple_hid_mode[1] = { 0x3f };
+    joycon_send_subcommand(handle, CMD_SET_INPUT_REPORT_MODE, simple_hid_mode, 1);
+}
+
+int device_connection()
+{
     // Joy-Con (L)
-    if (handle = hid_open(0x57e, 0x2006, nullptr)) {
-        handle_ok = 1;
+    if (handle = hid_open(NINTENDO_VID, JOY_CON_L_PID, nullptr)) {
+        device_type = 1;
         return 1;
     }
 
     // Joy-Con (R)
-    if (handle = hid_open(0x57e, 0x2007, nullptr)) {
-        handle_ok = 2;
+    if (handle = hid_open(NINTENDO_VID, JOY_CON_R_PID, nullptr)) {
+        device_type = 2;
         return 2;
     }
 
     // Pro Controller
-    if (handle = hid_open(0x57e, 0x2009, nullptr)) {
-        handle_ok = 3;
+    if (handle = hid_open(NINTENDO_VID, PRO_CONTROLLER_PID, nullptr)) {
+        device_type = 3;
         return 3;
     }
 
     // SNES Controller
-    if (handle = hid_open(0x57e, 0x2017, nullptr)) {
-        handle_ok = 4;
+    if (handle = hid_open(NINTENDO_VID, SNES_CONTROLLER_PID, nullptr)) {
+        device_type = 4;
         return 4;
     }
 
@@ -111,15 +136,42 @@ int device_connection() {
     return 0;
 }
 
-static wchar_t* charToWChar(const char* text)
+wchar_t* get_controller_name(int device_type)
 {
-    const size_t size = strlen(text) + 1;
-    wchar_t* wText = new wchar_t[size];
-    mbstowcs(wText, text, size);
-    return wText;
+    switch (device_type)
+    {
+    case 1:
+        return L"Joy-Con (L)";
+    case 2:
+        return L"Joy-Con (R)";
+    case 3:
+        return L"Pro Controller";
+    case 4:
+        return L"SNES Controller";
+    default:
+        return L"Unknown controller, maybe it is not wise to continue!";
+    }
 }
 
-int Main(array<String^>^ args) {
+wchar_t* get_device_info()
+{
+    int res;
+    wchar_t mfg[MAX_STR];
+    wchar_t prod[MAX_STR];
+    wchar_t sn[MAX_STR];
+    wchar_t ret[MAX_STR];
+
+    res = hid_get_manufacturer_string(handle, mfg, MAX_STR);
+    res = hid_get_product_string(handle, prod, MAX_STR);
+    res = hid_get_serial_number_string(handle, sn, MAX_STR);
+
+    swprintf(ret, MAX_STR, L"%ls %ls\nType: %ls\nHID serial number: %ls", mfg, prod, get_controller_name(device_type), sn);
+
+    return ret;
+}
+
+int Main()
+{
     const wchar_t title[100] = L"Shutdown Joy-Con";
 
     int warning_result = MessageBox(NULL,
@@ -149,42 +201,28 @@ int Main(array<String^>^ args) {
         }
     }
 
-    timing_byte = 0x0;
+    set_input_report_mode(handle);
+    set_leds(handle, 0b11110000);
 
-    set_leds(0xf0);
-        
-    wchar_t* controller_name;
-    if (handle_ok == 1) {
-        controller_name = L"Joy-Con (L)";
-    } else if (handle_ok == 2) {
-        controller_name = L"Joy-Con (R)";
-    } else if (handle_ok == 3) {
-        controller_name = L"Pro Controller";
-    } else if (handle_ok == 4) {
-        controller_name = L"SNES Controller";
-    } else {
-        controller_name = L"Unknown controller, maybe it is not wise to continue!";
-    }
-
-    wchar_t message[1000] = L"Detected controller: ";
-    wcsncat(message, controller_name, 1000);
+    wchar_t message[MAX_STR] = L"Controller found!\n\n";
+    wcsncat(message, get_device_info(), MAX_STR);
     wcsncat(message,
         L"\n\nPlease confirm that all the LEDs on the controller you want to turn off are flashing at the same time. "
         L"If they are not, please cancel now and verify you are connecting the controller with Bluetooth!"
-        L"\n\nPress OK to turn the controller off.", 1000);
+        L"\n\nPress OK to turn the controller off.", MAX_STR);
 
     int info_result = MessageBox(NULL,
         message, title,
         MB_ICONINFORMATION | MB_OKCANCEL);
 
     if (info_result != IDOK) {
-        set_leds(0x1);
+        set_leds(handle, 0b00000001);
         return 1;
     }
 
-    set_shipment_low_power();
-    reset_pairing_information();
-    turn_off();
+    set_shipment_low_power(handle);
+    reset_pairing_information(handle);
+    turn_off(handle);
 
     MessageBox(NULL, L"Controller has been turned off.", title, MB_OK);
 

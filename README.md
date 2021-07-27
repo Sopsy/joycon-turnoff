@@ -21,6 +21,8 @@ USE WITH YOUR OWN RISK! I take no responsibility on whatever happens to your con
 
 I have no clue how to code C++ or how to reverse engineer the controllers, so this is based on the work of others.
 
-Based on the code of Joy-Con Toolkit: https://github.com/CTCaer/jc_toolkit
+Originally started as a fork of https://github.com/CTCaer/jc_toolkit, but after a couple of rewrites, does not really look like it anymore.
 
 HID commands from: https://github.com/dekuNukem/Nintendo_Switch_Reverse_Engineering
+
+Lots of help with HID code: https://github.com/shinyquagsire23/HID-Joy-Con-Whispering
