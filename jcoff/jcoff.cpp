@@ -8,11 +8,14 @@
 #define HID_BUFFER_LENGTH 0x40
 #define MAX_STR 10000
 
+// VID should always be the same for first party controllers.
+// On Windows PID can be found from Device Manager, go to Device Properties -> Details -> Siblings
 #define NINTENDO_VID (0x57e)
 #define JOY_CON_L_PID (0x2006)
 #define JOY_CON_R_PID (0x2007)
 #define PRO_CONTROLLER_PID (0x2009)
 #define SNES_CONTROLLER_PID (0x2017)
+#define N64_CONTROLLER_PID (0x2019)
 #define CHARGING_GRIP_PID (0x200e)
 
 #define CMD_SET_INPUT_REPORT_MODE (0x03)
@@ -132,6 +135,12 @@ int device_connection()
         return 4;
     }
 
+    // N64 Controller
+    if (handle = hid_open(NINTENDO_VID, N64_CONTROLLER_PID, nullptr)) {
+        device_type = 5;
+        return 5;
+    }
+
     // Nothing found
     return 0;
 }
@@ -148,6 +157,8 @@ wchar_t* get_controller_name(int device_type)
         return L"Pro Controller";
     case 4:
         return L"SNES Controller";
+    case 5:
+        return L"N64 Controller";
     default:
         return L"Unknown controller, maybe it is not wise to continue!";
     }
@@ -172,17 +183,18 @@ wchar_t* get_device_info()
 
 int Main()
 {
-    const wchar_t title[100] = L"Shutdown Joy-Con";
+    const wchar_t title[100] = L"Shut down Nintendo Switch controller";
 
     int warning_result = MessageBox(NULL,
-        L"WARNING: This program will write to the SPI flash of your\n"
-        L"connected Nintendo Switch controller. This can brick your controller.\n\n"
-        L"CONTINUE AT YOUR OWN RISK!\n\n"
+        L"Please read all of this, this is important!\n\n"
+        L"WARNING: This program will write to the SPI flash of your connected Nintendo Switch controller.\n"
+        L"This can brick your controller.\n\n"
+        L"!!CONTINUE AT YOUR OWN RISK!!\n\n"
         L"IMPORTANT: The controller needs to be connected via Bluetooth or this will not work!\n\n"
         L"If all goes well, your controller will be left in a state like it was sent from the factory:\n"
         L"- Low battery consumption (will not die in a week)\n- Pressing buttons will not turn it on\n- Pairing information is removed\n\n"
-        L"To use the controller again, you will need to reattach it to your Switch. "
-        L"Bluetooth pairing can also be initiated by long-pressing the Sync-button."
+        L"To reconnect the controller, do Bluetooth pairing again or connect it to your Switch with a USB cable.\n\n"
+        L"To start Bluetooth pairing, long-press the sync button (small round button near the LEDs)."
         , title, MB_ICONWARNING | MB_OKCANCEL);
 
     if (warning_result == IDCANCEL) {
@@ -191,7 +203,7 @@ int Main()
 
     while (!device_connection()) {
         int connection_retry_result = MessageBox(NULL,
-            L"No Joy-Con was detected!\n\n"
+            L"No Nintendo Switch controller was detected!\n\n"
             L"Please connect the controller with Bluetooth and click retry.\n"
             L"Long press the sync button on the controller to turn on pairing mode.\n",
             title, MB_RETRYCANCEL | MB_ICONERROR);
