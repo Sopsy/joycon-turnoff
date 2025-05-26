@@ -28,6 +28,12 @@ Unofficial controllers are not supported.
 1. Connect your controller to your PC with Bluetooth (USB does not work!)
 2. Run the program, read the information carefully and click the correct buttons.
 
+# Linux/Mac port
+Thanks to [@ManeFunction](https://github.com/ManeFunction), there is now a port for Linux and Mac as well!  
+Please note that I have not tested or audited the code, but I took a quick look and it looks like it does what it promises.
+
+See: https://github.com/ManeFunction/joycon-turnoff-ports
+
 ## Thanks
 
 I'm not very experienced in writing C/C++ or reverse engineering the controllers, so this is based on the work of others.
